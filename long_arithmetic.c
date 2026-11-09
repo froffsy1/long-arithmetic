@@ -1,71 +1,94 @@
 #include <stdio.h>
-#include <string.h>
-#define BASE 10000
-#define MAX_BLOCKS 1000
+#define BASE 65536
+#define MAX_BLOCKS 208
 
 typedef struct { /*Структура числа*/
-	short digits[MAX_BLOCKS];
-	int len;
-	int sign;
+	unsigned short digits[MAX_BLOCKS];
+	unsigned char ls[2];
 } BigInt;
 
-void readBigInt(BigInt *num) { /*Чтение числа*/
+int mulSmallAdd(BigInt* num, int m, int add) {
+	int carry = add;
+	for (int i = 0; i < num->ls[0]; i++) {
+		int current = num->digits[i] * m + carry;
+		num->digits[i] = current % BASE;
+		carry = current / BASE;
+	}
+	if (carry > 0) {
+		if (num->ls[0] >= MAX_BLOCKS) {
+			printf("Error: array index out of bounds");
+			return 1;
+		}
+		num->digits[num->ls[0]] = carry;
+		num->ls[0]++;
+	}
+	return 0;
+}
+
+int divSmall(BigInt* num,  int d) {
+	 int remainder = 0;
+	for (int i = num->ls[0] - 1; i >= 0; i--) {
+		 int current = remainder * BASE + num->digits[i];
+		num->digits[i] = current / d;
+		remainder = current % d;
+	}
+	while (num->ls[0] > 1 && num->digits[num->ls[0] - 1] == 0) {
+		num->ls[0]--;
+	}
+	return remainder;
+}
+
+int readBigInt(BigInt* num) { /*Чтение числа*/
 	char input[1002];
 	int start = 0;
 	scanf_s("%1001s", input, (unsigned)sizeof(input));
 	if (input[0] == '-') {
 		start = 1;
-		num->sign = -1;
+		num->ls[1] = 0;
 	}
 	else {
-		num->sign = 1;
+		num->ls[1] = 1;
 	}
-	int length = strlen(input);
-	int block = 0;
-	int multiplier = 1;
-	int count = 0;
-	int index = 0;
-	for (int i = length - 1;i >= start;i--) {
-		int digit = input[i] - '0';
-		block += digit * multiplier;
-		multiplier *= 10;
-		count++; 
-		
-		if (count == 4) {
-			num->digits[index] = block;
-			block = 0;
-			multiplier = 1;
-			count = 0;
-			index++;
+	num->digits[0] = 0;
+	num->ls[0] = 1;
+	for (int i = start; input[i] != '\0'; i++) {
+		if (mulSmallAdd(num, 10, input[i] - '0')) {
+			return 1;
 		}
 	}
-	if (count > 0) {
-		num->digits[index] = block;
-		index++;
-	}
-	num->len = index;
-
+	return 0;
 }
 
 void printBigInt(BigInt* num) { /*Вывод числа*/
+	BigInt temp = *num;
+	int parts[251]; 
+	int count = 0;
+	while (!(temp.ls[0] == 1 && temp.digits[0] == 0)) {
+		parts[count] = divSmall(&temp, 10000);
+		count++;
+	}
 	printf("Result=");
-	if (num->sign == -1) {
+	if (count == 0) {
+		printf("0");
+		return;
+	}
+	if (num->ls[1] == 0) {
 		printf("-");
 	}
-	printf("%d", num->digits[num->len - 1]);
-	for (int i = num->len - 2;i >= 0;i--) {
-		printf("%04d", num->digits[i]);
+	printf("%u", parts[count - 1]);
+	for (int i = count - 2; i >= 0; i--) {
+		printf("%04u", parts[i]);
 	}
 }
 
 int compareAbs(BigInt* a, BigInt* b) { /*Сравнение модулей*/
-	if (a->len > b->len) {
+	if (a->ls[0] > b->ls[0]) {
 		return 1;
 	}
-	else if (a->len < b->len) {
+	else if (a->ls[0] < b->ls[0]) {
 		return -1;
 	}
-	for (int i = a->len - 1;i >= 0;i--) {
+	for (int i = a->ls[0] - 1;i >= 0;i--) {
 		if (a->digits[i] > b->digits[i]) {
 			return 1;
 		}
@@ -78,13 +101,13 @@ int compareAbs(BigInt* a, BigInt* b) { /*Сравнение модулей*/
 
 void substractAbs(BigInt* a, BigInt* b, BigInt* result) {/*Вычитание модулей*/
 	int borrow = 0;
-	result->len = a->len;
-	result->sign = 1;
+	result->ls[0] = a->ls[0];
+	result->ls[1] = 1;
 
-	for (int i = 0; i < a->len;i++) {
+	for (int i = 0; i < a->ls[0];i++) {
 		int x = a->digits[i];
 		int y;
-		if (i < b->len) {
+		if (i < b->ls[0]) {
 			y = b->digits[i];
 		}
 		else {
@@ -100,50 +123,49 @@ void substractAbs(BigInt* a, BigInt* b, BigInt* result) {/*Вычитание м
 		}
 		result->digits[i] = diff;
 	}
-	while (result->len > 1 && result->digits[result->len - 1] == 0) {
-		result->len--;
+	while (result->ls[0] > 1 && result->digits[result->ls[0] - 1] == 0) {
+		result->ls[0]--;
 	}
 }
 
-void addBigInt(BigInt* a, BigInt* b, BigInt* result) { /*Сложение чисел*/
-	if (a->sign != b->sign) {
+int addBigInt(BigInt* a, BigInt* b, BigInt* result) { /*Сложение чисел*/
+	if (a->ls[1] != b->ls[1]) {
 		int cmp = compareAbs(a, b);
 		if (cmp == 0) {
 			result->digits[0] = 0;
-			result->len = 1;
-			result->sign = 1;
-			return;
+			result->ls[0] = 1;
+			result->ls[1]  = 1;
+			return 0;
 		}
 		if (cmp > 0) {
 			substractAbs(a, b, result);
-			result->sign = a->sign;
+			result->ls[1] = a->ls[1];
 		}
 		else {
 			substractAbs(b, a, result);
-			result->sign = b->sign;
+			result->ls[1] = b->ls[1];
 		}
-		return;
+		return 0;
 	}
-	int maxLen = (a->len > b->len) ? a->len : b->len;
-	int carry = 0;
-	result->len = maxLen;
-	result->sign = a->sign;
-	if (a->sign == -1 && b->sign == -1) {
-		result->sign = -1;
+	else if (a->ls[1] == 0 && b->ls[1] == 0) {
+		result->ls[1] = 0;
 	}
 	else {
-		result->sign = 1;
+		result->ls[1] = 1;
 	}
+	int maxLen = (a->ls[0] > b->ls[0]) ? a->ls[0] : b->ls[0];
+	int carry = 0;
+	result->ls[0] = maxLen;
 	for (int i = 0; i < maxLen;i++) {
 		int x;
-		if (i < a->len) {
+		if (i < a->ls[0]) {
 			x = a->digits[i];
 		}
 		else {
 			x = 0;
 		}
 		int y;
-		if (i < b->len) {
+		if (i < b->ls[0]) {
 			y = b->digits[i];
 		}
 		else {
@@ -155,120 +177,141 @@ void addBigInt(BigInt* a, BigInt* b, BigInt* result) { /*Сложение чис
 	
 		}
 	if (carry > 0) {
+		if (maxLen >= MAX_BLOCKS) {
+			printf("Error: array index out of bounds");
+			return 1;
+		}
 		result->digits[maxLen] = carry;
-		result->len++;
+		result->ls[0]++;
 	}
+	return 0;
 }
 
-void substractBigInt(BigInt* a, BigInt* b, BigInt* result) {/*Вычитание чисел*/
-	if (a->sign != b->sign) {
+int substractBigInt(BigInt* a, BigInt* b, BigInt* result) {/*Вычитание чисел*/
+	if (a->ls[1] != b->ls[1]) {
 		BigInt tempA = *a;
 		BigInt tempB = *b;
-		tempA.sign = 1;
-		tempB.sign = 1;
+		tempA.ls[1] = 1;
+		tempB.ls[1] = 1;
 
-		addBigInt(&tempA, &tempB, result);
-		result->sign = a->sign;
-		return;
+		if (addBigInt(&tempA, &tempB, result)) {
+			return 1;
+		}
+		result->ls[1] = a->ls[1];
+		return 0;
 	}
 	int cmp = compareAbs(a, b);
 	if (cmp == 0) {
 		result->digits[0] = 0;
-		result->len = 1;
-		result->sign = 1;
-		return;
+		result->ls[0] = 1;
+		result->ls[1] = 1;
+		return 0;
 	}
 	if (cmp > 0) {
 		substractAbs(a, b, result);
-		result->sign = a->sign;
+		result->ls[1] = a->ls[1];
 	}
 	else {
 		substractAbs(b, a, result);
-		result->sign = -a->sign;
+		result->ls[1] = 1 - a->ls[1];
 	}
+	return 0;
 }
 
-void multiplyBigInt(BigInt* a, BigInt* b, BigInt* result) { /*Умножение чисел*/
-	result->len = a->len + b->len;
-	result->sign = a->sign * b->sign;
-	for (int i = 0;i < result->len;i++) {
+int multiplyBigInt(BigInt* a, BigInt* b, BigInt* result) { /*Умножение чисел*/
+	int len = a->ls[0] + b->ls[0];
+	result->ls[1] = a->ls[1] * b->ls[1];
+	for (int i = 0;i < len && i < MAX_BLOCKS;i++) {
 		result->digits[i] = 0;
 	}
-	for (int i = 0;i < a->len;i++) {
-		int carry = 0;
-		for (int j = 0;j < b->len;j++) {
-			int current = result->digits[i + j] 
-				+ a->digits[i] * b->digits[j] 
-				+ carry;
+	for (int i = 0;i < a->ls[0];i++) {
+		unsigned int carry = 0;
+		for (int j = 0;j < b->ls[0];j++) {
+			unsigned int current =  (unsigned int)a->digits[i] * b->digits[j] + carry;
+			if (i + j >= MAX_BLOCKS) {
+				if (current != 0) {
+					printf("Error: array index out of bounds");
+					return 1;
+				}
+				continue;
+			}
+			current += result->digits[i + j];
 			result->digits[i + j] = current % BASE;
 			carry = current / BASE;
 		}
-		int pos = i + b->len;
+		int pos = i + b->ls[0];
 		while (carry > 0) {
-			int current = result->digits[pos] + carry;
+			if (pos >= MAX_BLOCKS) {
+				printf("Error: array index out of bounds");
+				return 1;
+			}
+			unsigned int current = result->digits[pos] + carry;
 			result->digits[pos] = current % BASE;
 			carry = current / BASE;
 			pos++;
 		}
 	}
-	while (result->len > 1 && result->digits[result->len - 1] == 0) {
-		result->len--;
+	if (len > MAX_BLOCKS) {
+		len = MAX_BLOCKS;
 	}
-	if (result->len == 1 && result->digits[0] == 0) {
-		result->sign = 1;
+	while (len > 1 && result->digits[len - 1] == 0) {
+		len--;
 	}
+	result->ls[0] = len;
+	return 0;
 }
 
-void powerBigInt(BigInt* a, BigInt* b, BigInt* result) {/*Степень*/
+int powerBigInt(BigInt* a, BigInt* b, BigInt* result) {/*Степень*/
 	int power = b->digits[0];
 	result->digits[0] = 1;
-	result->len = 1;
-	result->sign = 1;
+	result->ls[0] = 1;
+	result->ls[1] = 1;
 
 	for (int i = 0;i < power;i++) {
 		BigInt temp;
-		multiplyBigInt(result, a, &temp);
+		if (multiplyBigInt(result, a, &temp)) {
+			return 1;
+		}
 		*result = temp;
 	}
+	return 0;
 }
 
-void factorialBigInt(BigInt* a, BigInt* result){/*Факториал*/ 
+int factorialBigInt(BigInt* a, BigInt* result){/*Факториал*/ 
 	int n = a->digits[0];
 	result->digits[0] = 1;
-	result->len = 1;
-	result->sign = 1;
+	result->ls[0] = 1;
+	result->ls[1] = 1;
 
 	for (int i = 2;i <= n;i++) {
 		BigInt temp;
 		BigInt num;
 		num.digits[0] = i;
-		num.len = 1;
-		num.sign = 1;
-		multiplyBigInt(result, &num, &temp);
+		num.ls[0] = 1;
+		num.ls[1] = 1;
+		if (multiplyBigInt(result, &num, &temp)) {
+			return 1;
+		}
 		*result = temp;
-
 	}
+	return 0;
 }
 
 void divideBy2(BigInt* num) {
 	int remainder = 0;
 
-	for (int i = num->len - 1;i >= 0;i--) {
+	for (int i = num->ls[0] - 1;i >= 0;i--) {
 		int current = remainder * BASE + num->digits[i];
 		num->digits[i] = current / 2;
 		remainder = current % 2;
 	}
 
-	while (num->len > 1 && num->digits[num->len - 1] == 0) {
-		num->len--;
-	}
-
-	if (num->len == 1 && num->digits[0] == 0){
-		num->sign = 1;
+	while (num->ls[0] > 1 && num->digits[num->ls[0] - 1] == 0) {
+		num->ls[0]--;
 	}
 }
 
-void sumBigInt(BigInt* a, BigInt* b, BigInt* result) {
+int sumBigInt(BigInt* a, BigInt* b, BigInt* result) {
 	BigInt sum;
 	BigInt dif;
 	BigInt count;
@@ -276,50 +319,57 @@ void sumBigInt(BigInt* a, BigInt* b, BigInt* result) {
 	BigInt one;
 
 	one.digits[0] = 1;
-	one.len = 1;
-	one.sign = 1;
+	one.ls[0] = 1;
+	one.ls[1] = 1;
 
-	addBigInt(a, b, &sum);
-
-	substractBigInt(b, a, &dif);
-
-	addBigInt(&dif, &one, &count);
-
-	multiplyBigInt(&sum, &count, &product);
-
+	if (addBigInt(a, b, &sum)) {
+		return 1;
+	}
+	if (substractBigInt(b, a, &dif)) {
+		return 1;
+	}
+	if (addBigInt(&dif, &one, &count)) {
+		return 1;
+	}
+	if (multiplyBigInt(&sum, &count, &product)) {
+		return 1;
+	}
 	divideBy2(&product);
-
 	*result = product;
-	
+	return 0;
 }
 int main(void) {
 	BigInt a,b,result;
 	char op;
+	int err = 0;
 	scanf_s("%c", &op);
-	readBigInt(&a);
-	readBigInt(&b);
+	if (readBigInt(&a) || readBigInt(&b)) {
+		return 1;
+	}
 	switch (op) {
 	case '+' :
-		addBigInt(&a, &b, &result);
+		err=addBigInt(&a, &b, &result);
 		break;
 	case '-':
-		substractBigInt(&a, &b, &result);
+		err=substractBigInt(&a, &b, &result);
 		break;
 	case '*':
-		multiplyBigInt(&a, &b, &result);
+		err=multiplyBigInt(&a, &b, &result);
 		break;
 	case '^':
-		powerBigInt(&a, &b, &result);
+		err=powerBigInt(&a, &b, &result);
 		break;
 	case '!':
-		factorialBigInt(&a, &result);
+		err=factorialBigInt(&a, &result);
 		break;
 	case 'S':
 	case 's':
-		sumBigInt(&a, &b, &result);
+		err=sumBigInt(&a, &b, &result);
 		break;
 	}
-	
+	if (err) {
+		return 1;
+	}
 	printBigInt(&result);
 	return 0;
 }
